@@ -3,8 +3,11 @@
 #install.packages("raster")
 #install.packages("leaflet.minicharts")
 #install.packages('rmapshaper')
+#install.packages("shinydashboard")
 
 library(shiny)
+library(sf)
+library(sp)
 library(raster)
 library(leaflet)
 library(dplyr)
@@ -12,19 +15,26 @@ library(rstudioapi)
 library(leaflet.minicharts)
 library(rmapshaper)
 library(ggplot2)
+library(shinydashboard)
+
 
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 
-#data files are differently formatted depending on usage
+# bee data files are the same but differently formatted depending on usage
 bees = read.csv("bees.csv")
 bees_stacked = read.csv("bees_stacked.csv")
 
-# getting spacial data of US states
-usa_shape = raster::getData("GADM", country="USA", level=1)
-usa_shape = sf::st_as_sf(usa_shape)
+# # getting spacial data of US states
+# usa_shape = raster::getData("GADM", country="USA", level=1)
+# usa_shape = readRDS("gadm36_USA_1_sp.rds")
+# usa_shape = sf::st_as_sf(usa_shape)
 
-# Reducing detail of polygons in order to load map faster
-usa_shape = rmapshaper::ms_simplify(usa_shape)
+#  # Reducing detail of polygons in order to load map faster
+# usa_shape = rmapshaper::ms_simplify(usa_shape)
+# st_write(usa_shape, "usa_shape", driver = 'ESRI Shapefile')
+
+#the above code creates the shape file below which is loaded for efficiency
+usa_shape = st_read("usa_shape/")
 
 # function in order to show data for the year the user selects
 select_year = function(year){
@@ -35,14 +45,14 @@ select_year = function(year){
 
 # creating ui for shiny app
 ui = fluidPage(
-  titlePanel("Correlation between decline of bee populations
-              and use of pesticides in the U.S."),
+  h1("Correlation between decline of bee populations
+              and use of pesticides", align = "center", style = "color:green; font-size: 24px" ),
   sidebarLayout(
     sidebarPanel(
       selectInput("choropleth", "What would you like to see?", 
                   c("Number of bee colonies" = "Colonies",
-                    "Honey yield per colonie" = "YieldPerCol")),
-      checkboxInput("pesticides", "Show pesticide information in KG for California, Florida,
+                    "Honey yield per colony" = "YieldPerCol")),
+      checkboxInput("pesticides", "Show pesticide information in KG per year for California, Florida,
       Mississippi, North Dakota and Texas"),
       checkboxInput("cblind", "See colour-blind friendly version")),
     mainPanel(
@@ -61,9 +71,10 @@ ui = fluidPage(
   leafletOutput("us_map"),
   #leaflet mini charts
   leafletOutput("pie_chart"),
-  #reducing space between map and bar chart
-  div(style = "font-size: 10px; padding: 0px 0px; margin-top:-30em",
-      plotOutput("pollution_plot", width = '50%')
+  #reducing space between map and reference
+  div(style = "font-size: 10px; padding: 0px 0px; margin-top:-35em",
+      h6("Source: Zmith,K. (2018) 'Honeybees and Neonic Pesticides'. Retrieved from: ", tags$a(href="https://www.kaggle.com/kevinzmith/honey-with-neonic-pesticide", "https://www.kaggle.com/kevinzmith/honey-with-neonic-pesticide"))
+      
   )
 )
 
@@ -106,7 +117,7 @@ server = function(input,output) {
     
     # Define legend heading
     if (input$choropleth == "YieldPerCol") {
-      selection = "Honey yield per colonie"
+      selection = "Honey yield per colony in pounds"
     }
     else {
       selection = "Number of bee colonies"
@@ -114,28 +125,44 @@ server = function(input,output) {
     
     # map without pie charts
     mymap = leaflet() %>% 
-        addProviderTiles("CartoDB.Positron") %>%
-        setView(-91, 40, zoom = 4) %>%
-        addPolygons(data = usa,
-                    stroke = FALSE, smoothFactor = 0.2, fillOpacity = 0.6,
-                    color = ~pal(get(input$choropleth)),
-                    popup = paste("State: ", usa$NAME_1, "<br>",
-                                  "Value: ", usa_choice, "<br>")) %>%
-        addLegend(position = "bottomright", pal = pal, values = usa_choice,
-                  title = selection,
-                  opacity = 1) 
-      if (input$pesticides == TRUE) {
-        #leaflet mini charts
-        mymap = mymap %>% addMinicharts(
-          usa_states$lon,
-          usa_states$lat,
-          type = "pie",
-          chartdata = as.data.frame(usa_states)[,c("Clothianidin", "Imidacloprid", "Thiamethoxam", "Acetamiprid", "Thiacloprid")], 
-          colorPalette = colors, 
-          width = 60 * sqrt(usa_states$TotalNeonic) / sqrt(max(usa_states$TotalNeonic)), 
-          transitionTime = 0, legendPosition = "bottomleft")
-      }
+      addProviderTiles("CartoDB.Positron") %>%
+      setView(-91, 40, zoom = 4) %>%
+      addPolygons(data = usa,
+                  stroke = FALSE, smoothFactor = 0.2, fillOpacity = 0.6,
+                  color = ~pal(get(input$choropleth)),
+                  popup = paste("State: ", usa$NAME_1, "<br>",
+                                "Value: ", usa_choice, "<br>")) %>%
+      addLegend(position = "bottomright", pal = pal, values = usa_choice,
+                title = selection,
+                opacity = 1) 
+    if (input$pesticides == TRUE) {
+      #leaflet mini charts
+      mymap = mymap %>% addMinicharts(
+        usa_states$lon,
+        usa_states$lat,
+        type = "pie",
+        chartdata = as.data.frame(usa_states)[,c("Clothianidin", "Imidacloprid", "Thiamethoxam", "Acetamiprid", "Thiacloprid")], 
+        colorPalette = colors, 
+        width = 60 * sqrt(usa_states$TotalNeonic) / sqrt(max(usa_states$TotalNeonic)), 
+        transitionTime = 0, legendPosition = "bottomleft")
+    }
     print(mymap)
-    })
+  })
+  
 }
+
 shinyApp(ui,server)
+
+
+# References
+# 
+# GIS-Blog, Martin. (2015). Create a leaflet map using R. 
+# Retrieved from https://www.gisblog.com/create-a-leaflet-map-using-r/#comments
+#   
+# Guillem, F. (2019). Introduction to leaflet.minicharts. 
+# Retrieved from https://cran.rproject.org/web/packages/leaflet.minicharts/vignettes/introduction.html
+# 
+# Jazzurro (stackoverflow username). (2014). Answer to Question 
+# How to create a choropleth on a leaflet Map R. 
+# Retrieved from https://stackoverflow.com/questions/47571337/how-tocreate-a-choropleth-on-a-leaflet-map-r
+
